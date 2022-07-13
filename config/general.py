@@ -15,9 +15,9 @@ import os
 general = {
     'MCPath': './config/mc/',
     'DataPath': './config/mc/',
-    
+
     'DatasetPath': '/eos/cms/store/cmst3/group/top/WbWb/nano/', #add an auto detect here
-    
+
     'HistoPath': '/eos/cms/store/cmst3/group/top/WbWb/histos/testing/Jan/',
     'CardPath': './output/cards/',
     'FitPath': './output/fits/',

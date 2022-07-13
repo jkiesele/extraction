@@ -32,10 +32,11 @@ TM1 = ROOT.RDF.TH1DModel
 #simple helper
 class scheduledHist(object):
     
+    
     def __init__(self, hist, scale, sys):
-        self.hist=hist
-        self.scale=scale
-        self.sys=sys
+        self.hist = hist
+        self.scale = scale
+        self.sys = sys
 
 
 '''
@@ -44,6 +45,7 @@ first schedule (TBI: also for systematics), *then* do the loop
 '''
         
 class histoScheduler(object):
+    
     
     def __init__(self, rdf):
         self.rdf = rdf
