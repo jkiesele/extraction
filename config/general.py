@@ -14,8 +14,11 @@ import os
 
 general = {
     'MCPath': './config/mc/',
-    'DataPath': './config/data/',
-    'HistoPath': '/eos/cms/store/cmst3/group/top/WbWb/histos/2022-05-17_v1/',
+    'DataPath': './config/mc/',
+    
+    'DatasetPath': '/eos/cms/store/cmst3/group/top/WbWb/nano/', #add an auto detect here
+    
+    'HistoPath': '/eos/cms/store/cmst3/group/top/WbWb/histos/testing/Jan/',
     'CardPath': './output/cards/',
     'FitPath': './output/fits/',
     'PlotPath': './output/plots/',
@@ -52,17 +55,22 @@ def getGridpaths(isMC, year, filename):
     :param year: year of the dataset
     :param filename: filename of the dataset
     :returns: paths to files as list
+    :raises: Exception: datasetpath not defined for data yet! (if isMC=False, data not implementded yet)
     """
     filepath = ''
+    add = '/data/'
     if isMC:
         filepath = general['MCPath'] + year + '/' + filename + '.txt'
+        add = '/mc/'
     else:
-        filepath = general['DataPath'] + year + '/' + filename + '.txt'
+        raise Exception('datasetpath not defined for data yet!')
 
     filelist = []
     with open(filepath, 'r') as files:
         for f in files:
-            filelist.append(f.strip())
+            rfile = general['DatasetPath'] + add + f.strip()
+            print(rfile)
+            filelist.append(rfile)
 
     return filelist
 
@@ -79,11 +87,13 @@ def histopath(year, region, dataset, systematic=None, number=None):
     :param systematic: systematic of the histogram
     :param number: file number, `None` for merged file
     :returns: path to root file for the histograms
+    :raises: Exception: histopath not defined for data yet! (if isMC=False, data not implementded yet)
     """
     histodir = ''
 
-    if systematic is None or systematic == 'None':
-        histodir = general['HistoPath'] + '/data/{year}/{region}/'.format(year=year, region=region)
+    if systematic is None:
+        raise Exception('histopath not defined for data yet!')
+        #return general['DataPath'] + year + '/' + run + '/'
     else:
         histodir = general['HistoPath'] + '/mc/{year}/{region}/{systematic}/'.format(year=year, region=region, systematic=systematic)
 

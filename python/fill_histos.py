@@ -14,19 +14,43 @@ from ROOT import TH1, ROOT, TFile
 
 from helpers import getSystsplit, getDatasetInfo, get_event_weigths
 from config.general import general, getGridpaths, histopath, lumi
-from config.data import data
 from config.datasets import datasets
 from config.regions import regions
 from config.histograms import histograms
 from config.systematics import systematics
 
-datasets.update(data)
+from helpers import stopWatch
 
 TH1.SetDefaultSumw2(True)
 TH1.StatOverflows(True)
 
+# enable multi-threading
+ROOT.EnableImplicitMT()
 RDF = ROOT.RDataFrame
 TM1 = ROOT.RDF.TH1DModel
+
+#simple helper
+class scheduledHist(object):
+    
+    def __init__(self, hist, scale, sys):
+        self.hist=hist
+        self.scale=scale
+        self.sys=sys
+
+
+'''
+Use the full power of only-one-event-loop RDF magic:
+first schedule (TBI: also for systematics), *then* do the loop
+'''
+        
+class histoScheduler(object):
+    
+    def __init__(self, rdf):
+        self.rdf = rdf
+        self.shists = []
+        
+    
+    
 
 
 
@@ -42,6 +66,7 @@ def fillhistos(year, region, dataset, systematic, number, cuts):
     :param cuts: cuts to apply
     """
     starttime = datetime.datetime.now()
+    swatch = stopWatch("fillhistos")
     print(f'\nSTARTING AT {str(starttime)}')
 
     print(f'Year: {year}')
@@ -49,49 +74,47 @@ def fillhistos(year, region, dataset, systematic, number, cuts):
     print(f'Region: {region}')
     print(f'Systematic: {systematic}')
 
-    gridpaths = getGridpaths(isMC=datasets[dataset]['MC'], year=year, filename=datasets[dataset]['FileName'])
 
+    gridpaths = getGridpaths(isMC=datasets[dataset]['MC'], year=year, filename=datasets[dataset]['FileName'])
     inFileName = gridpaths[number]
     outFileName = histopath(year=year, region=region, dataset=dataset, systematic=systematic, number=number)
 
     # get original dataset size from number of entries (before cuts/filters) and preskim efficiency
-    datasetInfo = getDatasetInfo(gridpaths, MC=datasets[dataset]['MC'])
+    datasetInfo = getDatasetInfo(gridpaths, datasets[dataset]['MC'])
 
     weights = get_event_weigths(year, dataset, systematic, datasetInfo)
     print('EventWeights: {}'.format(weights))
 
-    print('\nOPENING INPUT FILE AND CREATING DATAFRAME')
-    dataframe = RDF(general['Tree'], inFileName)
+    print('\nOPENING INPUT FILE AND CREATING DATAFRAME', inFileName)
+    df_in = RDF(general['Tree'], inFileName)
+    df_out = df_in
 
+    swatch.checkAndReset("reading done")
 
     for cut in cuts:
         if cut != 'none':
             print(f'Applying additional cut: {cut}')
-            dataframe = dataframe.Filter(cut, cut)
+            df_out = df_out.Filter(cut, cut)
 
     if 'Filter' in regions[region].keys():
-        mask = regions[region]['Filter']
-        if datasets[dataset]['MC']:
-            mask = mask.replace('nominal', systematic)
+        mask = regions[region]['Filter'].replace('nominal', systematic)
         print(f'Applying region filter: {mask}')
-        dataframe = dataframe.Filter(mask, region)
+        df_out = df_out.Filter(mask, region)
 
 
-    dataframe = dataframe.Define('w', weights)
+    df_out = df_out.Define('w', weights)
 
+    swatch.checkAndReset("cuts and defines done")
 
     print('\nLOOPING OVER HISTOGRAMS')
     histos = {}
+    scales = {}
     for histname in histograms.keys():
         systematic, direction = getSystsplit(systematic)
-        branchname = histograms[histname]['Branch']
+        branchname = histograms[histname]['Branch'].replace('nominal', systematic)
 
-        if datasets[dataset]['MC']:
-            branchname = histograms[histname]['Branch'].replace('nominal', systematic)
-
-            if 'Branch' in systematics[systematic].keys():
-                branchname = branchname.replace('nominal', systematics[systematic]['Branch'][direction])
-
+        if 'Branch' in systematics[systematic].keys():
+            branchname = branchname.replace('nominal', systematics[systematic]['Branch'][direction])
 
         print(f'Reading from branch "{branchname}"...')
 
@@ -101,41 +124,41 @@ def fillhistos(year, region, dataset, systematic, number, cuts):
             continue
 
         if 'Expression' in histograms[histname].keys():
-            expression = histograms[histname]['Expression']
-            if datasets[dataset]['MC']:
-                expression = expression.replace('nominal', systematic)
-
+            expression = histograms[histname]['Expression'].replace('nominal', systematic)
             print(f'\nAdding temporary branch "{histname}" from Expression: {expression}')
-            dataframe = dataframe.Define(branchname, expression)
+            df_out = df_out.Define(branchname, expression)
 
-        if branchname in dataframe.GetColumnNames():
+        if branchname in df_out.GetColumnNames():
             histogram = {}
             if 'Histogram' in histograms[histname].keys():
                 histogram = histograms[histname]['Histogram']
 
             print(f'Adding histogram for {histname} with weights {weights}')
             if 'varbins' in histogram.keys():
-                histos[histname] = dataframe.Histo1D(TM1(histname,
-                                                     histname,
-                                                     histogram['nbins'],
-                                                     numpy.array(histogram['varbins'])),
-                                                     branchname, 'w')
+                histos[histname] = df_out.Histo1D(TM1(histname,
+                                                      histname,
+                                                      histogram['nbins'],
+                                                      numpy.array(histogram['varbins'])),
+                                                  branchname, 'w')
             else:
-                histos[histname] = dataframe.Histo1D(TM1(histname,
-                                                     histname,
-                                                     histogram['nbins'],
-                                                     histogram['xmin'],
-                                                     histogram['xmax']),
-                                                     branchname, 'w')
-
-            # apply global scale for MC
-            if datasets[dataset]['MC']:
-                scale = 1000 * datasets[dataset]['XS'] * datasets[dataset][year]['KFactor'] * lumi[year]
-                histos[histname].Scale(scale)
-
-                print(f'selected {histos[histname].GetEntries()} events out of {datasetInfo["genEventCount"]} (genEventCount)')
-                print(f"scaled with {scale:.3g} = {1000*datasets[dataset]['XS']:.1f}(XS in fb) \
-    * {datasets[dataset][year]['KFactor']}(K-factor) * {lumi[year]}(lumi in 1/fb)")
+                histos[histname] = df_out.Histo1D(TM1(histname,
+                                                      histname,
+                                                      histogram['nbins'],
+                                                      histogram['xmin'],
+                                                      histogram['xmax']),
+                                                  branchname, 'w')
+            
+            swatch.checkAndReset(histname + " define done")
+            # apply global scale
+            scale = datasets[dataset]['XS'] * datasets[dataset][year]['KFactor'] * lumi[year]
+            scales[histname] = scale
+            
+            # these prints and the removed scale statement made the plotting scale with N_histograms,
+            # nullifying the advantages of RDataFrame and the histogram booking
+            # print(f'selected {histos[histname].GetEntries()} events out of 
+            # {datasetInfo["genEventCount"]} (genEventCount)')
+            # print(f"scaled with {scale:.3g} = {datasets[dataset]['XS']:.1f}(XS) * 
+            # {datasets[dataset][year]['KFactor']}(K-factor) * {lumi[year]}(lumi)")
 
         else:
             print(f'\n\n\tERROR: Branch "{branchname}" defined in config/histogram.py not found!\n')
@@ -148,8 +171,13 @@ def fillhistos(year, region, dataset, systematic, number, cuts):
     print('===========================================\n\n')
 
     print('\nFILLING HISTOGRAMS')
-
-    report = dataframe.Report()
+    swatch.checkAndReset("Get to the processing")
+    report = df_out.Report()
+    
+    #do this only here otherwise a full loop is triggered for each histogram!
+    for k in histos.keys():
+        histos[k].Scale(scales[k])
+        swatch.checkAndReset(k + " scale done")
 
     outFile = TFile(outFileName, 'UPDATE')
     histoDir = outFile.Get(general['Histodir'])

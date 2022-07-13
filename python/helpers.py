@@ -9,6 +9,24 @@ Defines some general helper functions
 import ROOT
 from config.datasets import datasets
 from config.systematics import systematics
+import time
+
+class stopWatch(object):
+    def __init__(self,name=''):
+        self.name=name
+        self.timer = time.time()
+
+    def reset(self):
+        self.timer = time.time()
+
+    def check(self,addprintout=''):
+        el = time.time() - self.timer
+        print(self.name,addprintout,el,'s')
+
+    def checkAndReset(self,addprintout=''):
+        self.check(addprintout)
+        self.reset()
+
 
 
 def getSystsplit(systematic):
